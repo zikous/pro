@@ -9,13 +9,8 @@ const config: CodegenConfig = {
   ],
   ignoreNoDocuments: true, // Skip when no documents are found
   generates: {
-    "./lib/generated/": {
+    "./lib/graphql/generated/": {
       preset: "client",
-      plugins: [
-        "typescript",
-        "typescript-operations",
-        "typescript-react-apollo",
-      ],
       config: {
         withHooks: true,
         withComponent: false,

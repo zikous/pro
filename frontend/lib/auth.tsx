@@ -21,7 +21,7 @@ import {
   MeQuery,
   TokenAuthMutation,
   RegisterMutation,
-} from "./generated/graphql";
+} from "./graphql/generated/graphql";
 
 // Result type for auth operations
 type AuthResult = {

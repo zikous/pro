@@ -3,7 +3,7 @@
 // Example component showing how to use the generated GraphQL types
 import { useQuery } from "@apollo/client";
 import { ME_QUERY } from "@/lib/graphql/operations";
-import { MeQuery } from "@/lib/generated/graphql";
+import { MeQuery } from "@/lib/graphql/generated/graphql";
 import { useRedirectIfUnauthenticated } from "@/lib/redirect";
 
 export default function ExampleComponent() {
