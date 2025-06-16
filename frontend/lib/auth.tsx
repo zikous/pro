@@ -66,19 +66,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const checkAuth = async () => {
       const token = Cookies.get("token");
+      const refreshToken = Cookies.get("refreshToken");
 
       if (token) {
         try {
           await getMe();
-        } catch {
-          // Error handled in onError callback
+        } catch (error) {
+          console.error("Error checking auth:", error);
+          // If no refresh token available, log the user out
+          if (!refreshToken) {
+            setUser(null);
+            Cookies.remove("token");
+          }
         }
+      } else {
+        // No token, so user is not authenticated
+        setUser(null);
       }
 
       setLoading(false);
     };
 
     checkAuth();
+
+    // Set up interval to periodically check auth status (every 5 minutes)
+    const intervalId = setInterval(checkAuth, 5 * 60 * 1000);
+
+    return () => clearInterval(intervalId);
   }, [getMe]);
 
   // Login with email and password

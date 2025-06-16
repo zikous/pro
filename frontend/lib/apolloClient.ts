@@ -10,6 +10,7 @@ import { onError } from "@apollo/client/link/error";
 import { setContext } from "@apollo/client/link/context";
 import { RetryLink } from "@apollo/client/link/retry";
 import Cookies from "js-cookie";
+import { REFRESH_TOKEN_MUTATION } from "./graphql/operations";
 
 // GraphQL endpoint
 const httpLink = new HttpLink({
@@ -21,13 +22,39 @@ const httpLink = new HttpLink({
   },
 });
 
+// Track if we're currently refreshing to avoid multiple simultaneous refreshes
+let isRefreshing = false;
+// Queue of operations waiting for token refresh
+let pendingRequests: ((token: string | null) => void)[] = [];
+
+// Process queued operations after token refresh
+const processQueue = (token: string | null) => {
+  pendingRequests.forEach((callback) => callback(token));
+  pendingRequests = [];
+};
+
 // Refresh an expired token
 const refreshToken = async (): Promise<string | null> => {
   const refreshToken = Cookies.get("refreshToken");
 
   if (!refreshToken) {
+    // If no refresh token, clear the token to avoid infinite loops
+    Cookies.remove("token");
+    // Redirect to login if we're in the browser
+    if (typeof window !== "undefined") {
+      window.location.href = "/login";
+    }
     return null;
   }
+
+  if (isRefreshing) {
+    // Return a promise that resolves when the refresh is complete
+    return new Promise<string | null>((resolve) => {
+      pendingRequests.push((token: string | null) => resolve(token));
+    });
+  }
+
+  isRefreshing = true;
 
   try {
     const response = await fetch("http://localhost:8000/graphql/", {
@@ -38,21 +65,20 @@ const refreshToken = async (): Promise<string | null> => {
         Accept: "application/json",
       },
       body: JSON.stringify({
-        query: `
-          mutation RefreshToken($refreshToken: String!) {
-            refreshToken(refreshToken: $refreshToken) {
-              token
-              refreshToken
-              payload
-              refreshExpiresIn
-            }
-          }
-        `,
+        query: REFRESH_TOKEN_MUTATION.loc?.source.body,
         variables: { refreshToken },
       }),
     });
 
     if (!response.ok) {
+      isRefreshing = false;
+      processQueue(null);
+      // Clear tokens and redirect on failure
+      Cookies.remove("token");
+      Cookies.remove("refreshToken");
+      if (typeof window !== "undefined") {
+        window.location.href = "/login";
+      }
       return null;
     }
 
@@ -66,21 +92,34 @@ const refreshToken = async (): Promise<string | null> => {
       Cookies.set("token", token, { sameSite: "strict" });
       Cookies.set("refreshToken", newRefreshToken, { sameSite: "strict" });
 
+      isRefreshing = false;
+      processQueue(token);
       return token;
     }
-  } catch {
-    // Silently fail
+  } catch (error) {
+    console.error("Token refresh error:", error);
+  }
+
+  isRefreshing = false;
+  processQueue(null);
+
+  // Clear tokens and redirect on failure
+  Cookies.remove("token");
+  Cookies.remove("refreshToken");
+  if (typeof window !== "undefined") {
+    window.location.href = "/login";
   }
 
   return null;
 };
 
 // Handle GraphQL errors and token refresh
-const errorLink = onError(({ graphQLErrors, operation, forward }) => {
-  if (graphQLErrors) {
-    for (const err of graphQLErrors) {
-      // Handle authentication errors
-      if (err.extensions?.code === "UNAUTHENTICATED") {
+const errorLink = onError(
+  ({ graphQLErrors, networkError, operation, forward }) => {
+    // Handle network errors that might be authentication related
+    if (networkError) {
+      // @ts-expect-error Property statusCode exists on networkError
+      if (networkError.statusCode === 401 || networkError.statusCode === 403) {
         return fromPromise(refreshToken())
           .filter((token) => !!token)
           .flatMap((token) => {
@@ -96,8 +135,34 @@ const errorLink = onError(({ graphQLErrors, operation, forward }) => {
           });
       }
     }
+
+    if (graphQLErrors) {
+      for (const err of graphQLErrors) {
+        // Handle authentication errors
+        if (
+          err.extensions?.code === "UNAUTHENTICATED" ||
+          err.message.includes("authentication") ||
+          err.message.includes("token") ||
+          err.message.includes("expired")
+        ) {
+          return fromPromise(refreshToken())
+            .filter((token) => !!token)
+            .flatMap((token) => {
+              // Retry with new token
+              const oldHeaders = operation.getContext().headers;
+              operation.setContext({
+                headers: {
+                  ...oldHeaders,
+                  authorization: token ? `JWT ${token}` : "",
+                },
+              });
+              return forward(operation);
+            });
+        }
+      }
+    }
   }
-});
+);
 
 // Retry failed network requests
 const retryLink = new RetryLink({
