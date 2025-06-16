@@ -1,6 +1,5 @@
 "use client";
 
-// Auth context for user authentication management
 import {
   createContext,
   useContext,
@@ -22,14 +21,13 @@ import {
   TokenAuthMutation,
   RegisterMutation,
 } from "./graphql/generated/graphql";
+import { getCookieOptions } from "./utils";
 
-// Result type for auth operations
 type AuthResult = {
   success: boolean;
   message?: string;
 };
 
-// Auth context type definition
 interface AuthContextType {
   user: UserType | null;
   loading: boolean;
@@ -39,10 +37,8 @@ interface AuthContextType {
   isAuthenticated: boolean;
 }
 
-// Create context
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// Provider component that wraps the app
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<UserType | null>(null);
   const [loading, setLoading] = useState(true);
@@ -108,11 +104,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (data?.tokenAuth) {
         const { token, refreshToken } = data.tokenAuth;
 
-        // Store tokens in cookies
-        Cookies.set("token", token, { sameSite: "strict" });
-        Cookies.set("refreshToken", refreshToken, { sameSite: "strict" });
+        Cookies.set("token", token, getCookieOptions(7));
+        Cookies.set("refreshToken", refreshToken, getCookieOptions(30));
 
-        // Get user data
         await getMe();
 
         return { success: true };

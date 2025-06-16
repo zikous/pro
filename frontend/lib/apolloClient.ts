@@ -1,4 +1,3 @@
-// Apollo Client setup for GraphQL API communication
 import {
   ApolloClient,
   InMemoryCache,
@@ -11,8 +10,8 @@ import { setContext } from "@apollo/client/link/context";
 import { RetryLink } from "@apollo/client/link/retry";
 import Cookies from "js-cookie";
 import { REFRESH_TOKEN_MUTATION } from "./graphql/operations";
+import { getCookieOptions } from "./utils";
 
-// GraphQL endpoint
 const httpLink = new HttpLink({
   uri: "http://localhost:8000/graphql/",
   credentials: "include",
@@ -27,20 +26,16 @@ let isRefreshing = false;
 // Queue of operations waiting for token refresh
 let pendingRequests: ((token: string | null) => void)[] = [];
 
-// Process queued operations after token refresh
 const processQueue = (token: string | null) => {
   pendingRequests.forEach((callback) => callback(token));
   pendingRequests = [];
 };
 
-// Refresh an expired token
 const refreshToken = async (): Promise<string | null> => {
   const refreshToken = Cookies.get("refreshToken");
 
   if (!refreshToken) {
-    // If no refresh token, clear the token to avoid infinite loops
     Cookies.remove("token");
-    // Redirect to login if we're in the browser
     if (typeof window !== "undefined") {
       window.location.href = "/login";
     }
@@ -48,7 +43,6 @@ const refreshToken = async (): Promise<string | null> => {
   }
 
   if (isRefreshing) {
-    // Return a promise that resolves when the refresh is complete
     return new Promise<string | null>((resolve) => {
       pendingRequests.push((token: string | null) => resolve(token));
     });
@@ -73,7 +67,6 @@ const refreshToken = async (): Promise<string | null> => {
     if (!response.ok) {
       isRefreshing = false;
       processQueue(null);
-      // Clear tokens and redirect on failure
       Cookies.remove("token");
       Cookies.remove("refreshToken");
       if (typeof window !== "undefined") {
@@ -88,9 +81,8 @@ const refreshToken = async (): Promise<string | null> => {
     if (data?.refreshToken) {
       const { token, refreshToken: newRefreshToken } = data.refreshToken;
 
-      // Store the new tokens
-      Cookies.set("token", token, { sameSite: "strict" });
-      Cookies.set("refreshToken", newRefreshToken, { sameSite: "strict" });
+      Cookies.set("token", token, getCookieOptions(7));
+      Cookies.set("refreshToken", newRefreshToken, getCookieOptions(30));
 
       isRefreshing = false;
       processQueue(token);
@@ -103,7 +95,6 @@ const refreshToken = async (): Promise<string | null> => {
   isRefreshing = false;
   processQueue(null);
 
-  // Clear tokens and redirect on failure
   Cookies.remove("token");
   Cookies.remove("refreshToken");
   if (typeof window !== "undefined") {
@@ -113,17 +104,14 @@ const refreshToken = async (): Promise<string | null> => {
   return null;
 };
 
-// Handle GraphQL errors and token refresh
 const errorLink = onError(
   ({ graphQLErrors, networkError, operation, forward }) => {
-    // Handle network errors that might be authentication related
     if (networkError) {
       // @ts-expect-error Property statusCode exists on networkError
       if (networkError.statusCode === 401 || networkError.statusCode === 403) {
         return fromPromise(refreshToken())
           .filter((token) => !!token)
           .flatMap((token) => {
-            // Retry with new token
             const oldHeaders = operation.getContext().headers;
             operation.setContext({
               headers: {
@@ -164,7 +152,6 @@ const errorLink = onError(
   }
 );
 
-// Retry failed network requests
 const retryLink = new RetryLink({
   delay: {
     initial: 300,
@@ -177,7 +164,6 @@ const retryLink = new RetryLink({
   },
 });
 
-// Add auth token to requests
 const authLink = setContext((_, { headers }) => {
   const token = Cookies.get("token");
   return {
@@ -188,7 +174,6 @@ const authLink = setContext((_, { headers }) => {
   };
 });
 
-// Create Apollo Client
 const client = new ApolloClient({
   link: ApolloLink.from([errorLink, retryLink, authLink, httpLink]),
   cache: new InMemoryCache(),
